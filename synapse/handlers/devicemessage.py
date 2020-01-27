@@ -20,6 +20,7 @@ from canonicaljson import json
 from twisted.internet import defer
 
 from synapse.api.errors import SynapseError
+from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import (
     get_active_span_text_map,
     log_kv,
@@ -46,6 +47,8 @@ class DeviceMessageHandler(object):
         hs.get_federation_registry().register_edu_handler(
             "m.direct_to_device", self.on_direct_to_device_edu
         )
+
+        self._device_list_updater = hs.get_device_handler().device_list_updater
 
     @defer.inlineCallbacks
     def on_direct_to_device_edu(self, origin, content):
@@ -112,8 +115,9 @@ class DeviceMessageHandler(object):
                     yield self.store.mark_remote_user_device_cache_as_stale(
                         sender_user_id
                     )
-                    # TODO: Poke something to start trying to refetch user's
-                    # keys.
+                    run_in_background(
+                        self._device_list_updater.user_device_resync, sender_user_id
+                    )
 
         stream_id = yield self.store.add_messages_from_remote_to_device_inbox(
             origin, message_id, local_messages
